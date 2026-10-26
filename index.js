@@ -195,37 +195,35 @@
     }
 
     function findImageSource(img) {
-        // Prefer a loaded source, but fall back to raw attributes in case
-        // currentSrc points at a lazy-load placeholder.
+        const anchor = img.closest('a[href]');
         const candidates = [
-            img.getAttribute('src'),
-            img.getAttribute('data-src'),
-            img.getAttribute('data-original'),
+            anchor?.getAttribute('href'),
             img.getAttribute('data-full'),
+            img.getAttribute('data-original'),
+            img.getAttribute('data-src'),
             img.getAttribute('data-url'),
             img.currentSrc,
+            img.getAttribute('src'),
             img.src
         ].filter(Boolean);
 
-        const loaded = candidates.find((src) => {
+        for (const raw of candidates) {
+            if (/^(javascript:|#)/i.test(raw)) continue;
             try {
-                return img.complete && img.naturalWidth > 1 &&
-                    new URL(src, document.baseURI).href === img.currentSrc;
-            } catch (_) {
-                return false;
-            }
-        });
-        return loaded || candidates.find((src) => !/^(data:image\/(gif|svg\+xml);base64,)/i.test(src)) || '';
+                const url = new URL(raw, document.baseURI).href;
+                if (/^https?:|^blob:|^file:/i.test(url)) return url;
+            } catch (_) {}
+        }
+        return '';
     }
 
     function isChatImage(img) {
-        if (!(img instanceof HTMLImageElement)) return false;
-        if (!img.isConnected || img.closest(`#${VIEWER_ID}`)) return false;
-        if (img.closest('.avatar, .mesAvatarWrapper, #avatar_div, .character_select')) return false;
-        const chat = img.closest('#chat');
-        if (!chat) return false;
-        if (img.naturalWidth === 0 && !findImageSource(img)) return false;
-        return true;
+        if (!(img instanceof HTMLImageElement) || !img.isConnected) return false;
+        if (img.closest(`#${VIEWER_ID}`)) return false;
+        if (img.closest('.avatar, .mesAvatarWrapper, #avatar_div, .character_select, .user_avatar, .avatar img')) return false;
+        // SillyTavern themes/extensions use several message wrappers; accept the
+        // standard chat container and common message-content classes.
+        return Boolean(img.closest('#chat, .mes, .mes_text, .mes_block, .mes_content'));
     }
 
     function ensureViewer() {
@@ -353,9 +351,9 @@
         image.alt = img.alt || '';
         resetZoom();
         root.hidden = false;
+        document.body.classList.add('igv-open');
         // Assign after revealing the viewer so mobile browsers can begin loading.
         image.src = src;
-        document.body.classList.add('igv-open');
         root.querySelector('.igv-close')?.focus({ preventScroll: true });
     }
 
@@ -493,25 +491,37 @@
         }
     }
 
-    // Capture phase prevents SillyTavern's default image popup from also opening.
-    function onChatClick(event) {
+    // Delegated capture listeners work even when ST re-renders messages after edits.
+    // Do not reject anchor-wrapped images: those are common in SillyTavern markdown.
+    function onChatImageActivation(event) {
+        if (event.type === 'pointerdown' && event.pointerType === 'mouse' && event.button !== 0) return;
         const target = event.target;
         if (!(target instanceof Element)) return;
-        const img = target.closest('#chat img');
+        const img = target.closest('img');
         if (!img || !isChatImage(img)) return;
 
-        // Ignore images used as controls, if any.
-        if (img.closest('button, a[href]') && !img.closest('.mes_text')) return;
+        // Avoid avatar clicks and buttons, but allow an image inside an <a>.
+        if (img.closest('button') && !img.closest('.mes_text, .mes_block, .mes_content')) return;
+        const src = findImageSource(img);
+        if (!src) {
+            console.warn(`[${EXT}] Chat image found, but no usable source URL was found.`, img);
+            return;
+        }
 
         event.preventDefault();
         event.stopPropagation();
-        event.stopImmediatePropagation();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
         openViewer(img);
     }
 
     function init() {
         addRuntimeStyle();
-        document.addEventListener('click', onChatClick, true);
+        // Click is the primary path. Pointerup is a mobile fallback for skins
+        // that suppress synthetic clicks; ignore it for mouse to avoid duplicates.
+        document.addEventListener('click', onChatImageActivation, true);
+        document.addEventListener('pointerup', (event) => {
+            if (event.pointerType === 'touch') onChatImageActivation(event);
+        }, true);
         document.addEventListener('keydown', onKeyDown, true);
         console.info(`[${EXT}] Instagram-style toolbar and image zoom loaded.`);
     }
