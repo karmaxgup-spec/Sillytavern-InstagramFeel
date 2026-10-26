@@ -110,18 +110,37 @@
                 touch-action: none;
             }
             #ig-image-viewer .igv-image {
-                display: block;
-                max-width: 100vw;
-                max-height: 100dvh;
-                width: auto;
-                height: auto;
+                display: block !important;
+                position: relative;
+                z-index: 1;
+                max-width: 100vw !important;
+                max-height: 100dvh !important;
+                width: auto !important;
+                height: auto !important;
                 object-fit: contain;
                 transform-origin: center center;
                 will-change: transform;
                 user-select: none;
                 -webkit-user-drag: none;
                 pointer-events: none;
-                background: transparent;
+                background: transparent !important;
+            }
+            #ig-image-viewer .igv-status {
+                position: absolute;
+                z-index: 2;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                max-width: 80vw;
+                padding: 12px 16px;
+                border-radius: 12px;
+                background: #171717;
+                color: #eee;
+                font: 14px/1.4 system-ui, sans-serif;
+                text-align: center;
+            }
+            #ig-image-viewer .igv-status[hidden] {
+                display: none !important;
             }
             #ig-image-viewer .igv-close,
             #ig-image-viewer .igv-control {
@@ -176,8 +195,27 @@
     }
 
     function findImageSource(img) {
-        return img.currentSrc || img.src || img.getAttribute('data-src') ||
-            img.getAttribute('data-original') || '';
+        // Prefer a loaded source, but fall back to raw attributes in case
+        // currentSrc points at a lazy-load placeholder.
+        const candidates = [
+            img.getAttribute('src'),
+            img.getAttribute('data-src'),
+            img.getAttribute('data-original'),
+            img.getAttribute('data-full'),
+            img.getAttribute('data-url'),
+            img.currentSrc,
+            img.src
+        ].filter(Boolean);
+
+        const loaded = candidates.find((src) => {
+            try {
+                return img.complete && img.naturalWidth > 1 &&
+                    new URL(src, document.baseURI).href === img.currentSrc;
+            } catch (_) {
+                return false;
+            }
+        });
+        return loaded || candidates.find((src) => !/^(data:image\/(gif|svg\+xml);base64,)/i.test(src)) || '';
     }
 
     function isChatImage(img) {
@@ -207,7 +245,21 @@
         image.className = 'igv-image';
         image.alt = '';
         image.draggable = false;
-        stage.appendChild(image);
+
+        const status = document.createElement('div');
+        status.className = 'igv-status';
+        status.textContent = 'Loading image…';
+        stage.append(image, status);
+
+        image.addEventListener('load', () => {
+            status.hidden = true;
+            image.style.display = 'block';
+        });
+        image.addEventListener('error', () => {
+            status.hidden = false;
+            status.textContent = 'Could not load this image. Close and try again.';
+            image.style.display = 'none';
+        });
 
         const close = document.createElement('button');
         close.className = 'igv-close';
@@ -291,10 +343,18 @@
         const root = ensureViewer();
         const image = currentViewerImage();
         activeImg = img;
-        image.src = src;
+        image.style.display = 'block';
+        const status = root.querySelector('.igv-status');
+        if (status) {
+            status.hidden = false;
+            status.textContent = 'Loading image…';
+        }
+        image.removeAttribute('src');
         image.alt = img.alt || '';
         resetZoom();
         root.hidden = false;
+        // Assign after revealing the viewer so mobile browsers can begin loading.
+        image.src = src;
         document.body.classList.add('igv-open');
         root.querySelector('.igv-close')?.focus({ preventScroll: true });
     }
@@ -304,7 +364,15 @@
         viewer.hidden = true;
         document.body.classList.remove('igv-open');
         const image = currentViewerImage();
-        if (image) image.removeAttribute('src');
+        if (image) {
+            image.removeAttribute('src');
+            image.style.display = 'block';
+        }
+        const status = viewer.querySelector('.igv-status');
+        if (status) {
+            status.hidden = true;
+            status.textContent = 'Loading image…';
+        }
         if (activeImg?.isConnected) activeImg.focus?.({ preventScroll: true });
         activeImg = null;
         resetZoom();
