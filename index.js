@@ -89,6 +89,11 @@
             #ig-image-viewer {
                 position: fixed;
                 inset: 0;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                height: 100dvh;
                 z-index: 2147483000;
                 display: flex;
                 align-items: center;
@@ -301,7 +306,12 @@
         stage.addEventListener('pointercancel', onPointerUp);
         stage.addEventListener('dblclick', onDoubleClick);
         viewer.addEventListener('click', (event) => {
-            if (event.target === viewer) closeViewer();
+            if (event.target !== viewer && event.target !== stage) return;
+            if (scale > 1) return;
+            const r = currentViewerImage()?.getBoundingClientRect();
+            const onImage = r && event.clientX >= r.left && event.clientX <= r.right
+                && event.clientY >= r.top && event.clientY <= r.bottom;
+            if (!onImage) closeViewer();
         });
 
         return viewer;
