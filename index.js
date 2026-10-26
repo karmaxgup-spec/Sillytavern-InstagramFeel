@@ -656,7 +656,16 @@
         if (video.dataset.igvPrepared) return;
         video.dataset.igvPrepared = '1';
         video.controls = false;
+        // Drop the poster so the chat shows the video's own first frame, not a placeholder icon.
+        video.removeAttribute('poster');
         if (!video.preload || video.preload === 'none') video.preload = 'metadata';
+        // Some browsers only paint a frame after a seek, so nudge past frame zero once metadata loads.
+        video.addEventListener('loadedmetadata', () => {
+            if (video.currentTime === 0 && !video.dataset.igvSeeked) {
+                video.dataset.igvSeeked = '1';
+                try { video.currentTime = 0.1; } catch (_) {}
+            }
+        });
     }
 
     function prepareAllChatVideos() {
