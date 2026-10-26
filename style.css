@@ -1,0 +1,51 @@
+/* SillyTavern Instagram UI + Image Zoom extension */
+
+/* Toolbar icon contrast */
+#top-bar button,
+#top-settings-holder button,
+#top-bar .menu_button,
+#top-settings-holder .menu_button,
+#send_form button,
+#send_form .menu_button,
+#send_form .round_button,
+#send_form .interactable {
+    color: #e8e8e8 !important;
+    opacity: 1 !important;
+    -webkit-tap-highlight-color: transparent;
+    transition: color .16s ease, background-color .16s ease, border-color .16s ease;
+}
+
+#top-bar button i,
+#top-settings-holder button i,
+#send_form button i,
+#send_form .menu_button i,
+#send_form .round_button i,
+#send_form .interactable i {
+    color: currentColor !important;
+    opacity: 1 !important;
+}
+
+#top-bar button svg,
+#top-settings-holder button svg,
+#send_form button svg,
+#send_form .menu_button svg,
+#send_form .round_button svg {
+    color: currentColor !important;
+    opacity: 1 !important;
+}
+
+#top-bar button:hover,
+#top-settings-holder button:hover,
+#send_form button:hover,
+#send_form .menu_button:hover,
+#send_form .round_button:hover {
+    color: #fff !important;
+    background-color: #191319 !important;
+    border-color: rgba(225, 48, 108, .55) !important;
+}
+
+#send_form {
+    border-top: 1px solid #222 !important;
+}
+
+/* Viewer CSS is also injected by index.js for reliable startup. */

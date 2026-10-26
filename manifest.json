@@ -1,0 +1,15 @@
+{
+  "display_name": "Instagram UI + Image Zoom",
+  "loading_order": 10,
+  "requires": [],
+  "optional": [],
+  "js": [
+    "index.js"
+  ],
+  "css": [
+    "style.css"
+  ],
+  "author": "ChatGPT",
+  "version": "1.0.0",
+  "homePage": ""
+}
