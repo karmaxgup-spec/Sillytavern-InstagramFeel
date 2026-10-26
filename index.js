@@ -286,6 +286,77 @@
                 text-align: center;
             }
             #ig-video-viewer .igv-status[hidden] { display: none !important; }
+            .igv-chat-preview {
+                position: relative;
+                width: min(100%, 420px);
+                aspect-ratio: 16 / 9;
+                margin: 4px 0;
+                border-radius: 12px;
+                overflow: hidden;
+                background: #212121;
+                cursor: pointer;
+                user-select: none;
+                -webkit-tap-highlight-color: transparent;
+                touch-action: manipulation;
+            }
+            .igv-chat-preview.igv-has-frame { aspect-ratio: auto; }
+            .igv-chat-preview .igv-preview-frame {
+                display: block;
+                width: 100%;
+                height: auto;
+                max-height: 70vh;
+                object-fit: contain;
+                background: #212121;
+            }
+            .igv-chat-preview.igv-has-frame .igv-preview-frame { min-height: 0; }
+            .igv-chat-preview .igv-preview-play {
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                width: 64px;
+                height: 64px;
+                margin: -32px 0 0 -32px;
+                border-radius: 50%;
+                background: rgba(40,40,40,.72);
+                box-shadow: 0 2px 10px rgba(0,0,0,.35);
+                pointer-events: none;
+            }
+            .igv-chat-preview .igv-preview-play::after {
+                content: '';
+                position: absolute;
+                left: 25px;
+                top: 20px;
+                border-left: 20px solid #fff;
+                border-top: 12px solid transparent;
+                border-bottom: 12px solid transparent;
+            }
+            .igv-chat-preview .igv-preview-bar {
+                position: absolute;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 14px 12px 8px;
+                background: linear-gradient(transparent, rgba(0,0,0,.75));
+                color: #fff;
+                font: 12px/1 system-ui, sans-serif;
+                pointer-events: none;
+            }
+            .igv-chat-preview .igv-preview-glyph {
+                width: 0;
+                height: 0;
+                border-left: 9px solid #fff;
+                border-top: 6px solid transparent;
+                border-bottom: 6px solid transparent;
+            }
+            .igv-chat-preview .igv-preview-track {
+                flex: 1;
+                height: 2px;
+                background: rgba(255,255,255,.35);
+                border-radius: 2px;
+            }
             body.igv-open { overflow: hidden !important; }
             @media (prefers-reduced-motion: reduce) {
                 #top-bar button, #top-settings-holder button, #send_form button {
@@ -652,20 +723,78 @@
         return '';
     }
 
+    // Each chat video gets a preview card: its first frame, a play button and a bottom bar.
+    // The real <video> stays hidden and is only used to grab the frame; tapping the card opens the player.
+    const previewVideos = new WeakMap();
+
+    function formatTime(seconds) {
+        if (!Number.isFinite(seconds)) return '';
+        const total = Math.floor(seconds);
+        const m = Math.floor(total / 60);
+        const sec = String(total % 60).padStart(2, '0');
+        return `${m}:${sec}`;
+    }
+
+    function buildChatPreview(video) {
+        const preview = document.createElement('div');
+        preview.className = 'igv-chat-preview';
+        preview.setAttribute('role', 'button');
+        preview.setAttribute('aria-label', 'Play video');
+
+        const canvas = document.createElement('canvas');
+        canvas.className = 'igv-preview-frame';
+
+        const play = document.createElement('div');
+        play.className = 'igv-preview-play';
+
+        const bar = document.createElement('div');
+        bar.className = 'igv-preview-bar';
+        const glyph = document.createElement('span');
+        glyph.className = 'igv-preview-glyph';
+        const time = document.createElement('span');
+        time.className = 'igv-preview-time';
+        const track = document.createElement('span');
+        track.className = 'igv-preview-track';
+        bar.append(glyph, time, track);
+
+        preview.append(canvas, play, bar);
+        previewVideos.set(preview, video);
+
+        const drawFrame = () => {
+            if (!video.videoWidth || !video.videoHeight) return;
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+            }
+            try {
+                canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+                preview.classList.add('igv-has-frame');
+            } catch (_) {}
+        };
+
+        video.addEventListener('loadedmetadata', () => {
+            time.textContent = formatTime(video.duration);
+            // Seek a hair past zero so the browser decodes a real frame instead of a blank one.
+            if (video.currentTime === 0) {
+                try { video.currentTime = 0.1; } catch (_) {}
+            }
+        });
+        video.addEventListener('loadeddata', drawFrame);
+        video.addEventListener('seeked', drawFrame);
+
+        return preview;
+    }
+
     function prepareChatVideo(video) {
         if (video.dataset.igvPrepared) return;
         video.dataset.igvPrepared = '1';
         video.controls = false;
-        // Drop the poster so the chat shows the video's own first frame, not a placeholder icon.
         video.removeAttribute('poster');
         if (!video.preload || video.preload === 'none') video.preload = 'metadata';
-        // Some browsers only paint a frame after a seek, so nudge past frame zero once metadata loads.
-        video.addEventListener('loadedmetadata', () => {
-            if (video.currentTime === 0 && !video.dataset.igvSeeked) {
-                video.dataset.igvSeeked = '1';
-                try { video.currentTime = 0.1; } catch (_) {}
-            }
-        });
+        if (!video.parentElement) return;
+
+        video.style.display = 'none';
+        video.parentElement.insertBefore(buildChatPreview(video), video);
     }
 
     function prepareAllChatVideos() {
@@ -778,7 +907,8 @@
     function onChatVideoActivation(event) {
         const target = event.target;
         if (!(target instanceof Element)) return;
-        const video = target.closest('video');
+        const preview = target.closest('.igv-chat-preview');
+        const video = preview ? previewVideos.get(preview) : target.closest('video');
         if (!video || !isChatVideo(video)) return;
 
         event.preventDefault();
