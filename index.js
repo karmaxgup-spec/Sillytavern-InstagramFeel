@@ -189,6 +189,103 @@
             #ig-image-viewer .igv-control:active {
                 background: linear-gradient(45deg,#feda75,#d62976,#833ab4,#405de6);
             }
+            #ig-video-viewer {
+                position: fixed;
+                top: 0; left: 0; width: 100vw; height: 100vh; height: 100dvh;
+                inset: 0;
+                z-index: 2147483000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(0,0,0,.98);
+                color: #fff;
+                touch-action: manipulation;
+                -webkit-tap-highlight-color: transparent;
+            }
+            #ig-video-viewer[hidden] { display: none !important; }
+            #ig-video-viewer .igv-stage {
+                position: absolute;
+                inset: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            #ig-video-viewer .igv-video {
+                display: block;
+                max-width: 100vw;
+                max-height: 100dvh;
+                width: auto;
+                height: auto;
+                background: #000;
+            }
+            #ig-video-viewer .igv-close {
+                position: absolute;
+                z-index: 3;
+                top: max(14px, env(safe-area-inset-top));
+                right: 14px;
+                width: 44px;
+                height: 44px;
+                border: 1px solid rgba(255,255,255,.16);
+                border-radius: 50%;
+                background: rgba(28,28,28,.88);
+                color: #fff;
+                font: 600 28px/1 system-ui, sans-serif;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                box-shadow: 0 3px 14px rgba(0,0,0,.35);
+            }
+            #ig-video-viewer .igv-video-bar {
+                position: absolute;
+                z-index: 3;
+                left: 14px;
+                right: 14px;
+                bottom: max(18px, env(safe-area-inset-bottom));
+            }
+            #ig-video-viewer .igv-video-bar input {
+                width: 100%;
+                accent-color: #e1306c;
+            }
+            #ig-video-viewer .igv-paused-badge {
+                position: absolute;
+                z-index: 2;
+                left: 50%;
+                top: 50%;
+                width: 72px;
+                height: 72px;
+                margin: -36px 0 0 -36px;
+                border-radius: 50%;
+                background: rgba(255,255,255,.85);
+                pointer-events: none;
+                opacity: 0;
+                transition: opacity .15s ease;
+            }
+            #ig-video-viewer .igv-paused-badge::after {
+                content: '';
+                position: absolute;
+                left: 26px;
+                top: 22px;
+                border-left: 24px solid #000;
+                border-top: 14px solid transparent;
+                border-bottom: 14px solid transparent;
+            }
+            #ig-video-viewer.igv-paused .igv-paused-badge { opacity: 1; }
+            #ig-video-viewer .igv-status {
+                position: absolute;
+                z-index: 2;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                max-width: 80vw;
+                padding: 12px 16px;
+                border-radius: 12px;
+                background: #171717;
+                color: #eee;
+                font: 14px/1.4 system-ui, sans-serif;
+                text-align: center;
+            }
+            #ig-video-viewer .igv-status[hidden] { display: none !important; }
             body.igv-open { overflow: hidden !important; }
             @media (prefers-reduced-motion: reduce) {
                 #top-bar button, #top-settings-holder button, #send_form button {
@@ -524,6 +621,174 @@
         openViewer(img);
     }
 
+    // ---------- Chat video player ----------
+    // Chat videos lose their native controls and open in a full-screen player.
+    // One tap on the video plays or pauses it, and the bar at the bottom seeks.
+    const VIDEO_VIEWER_ID = 'ig-video-viewer';
+    let videoViewer = null;
+    let videoEl = null;
+    let videoRange = null;
+    let videoStatus = null;
+
+    function isChatVideo(video) {
+        if (!(video instanceof HTMLVideoElement) || !video.isConnected) return false;
+        if (video.closest(`#${VIDEO_VIEWER_ID}`)) return false;
+        return Boolean(video.closest('#chat, .mes, .mes_text, .mes_block, .mes_content'));
+    }
+
+    function findVideoSource(video) {
+        const candidates = [
+            video.currentSrc,
+            video.getAttribute('src'),
+            video.querySelector('source')?.getAttribute('src')
+        ].filter(Boolean);
+        for (const raw of candidates) {
+            if (/^javascript:/i.test(raw)) continue;
+            try {
+                const url = new URL(raw, document.baseURI).href;
+                if (/^(https?:|blob:|file:|data:video)/i.test(url)) return url;
+            } catch (_) {}
+        }
+        return '';
+    }
+
+    function prepareChatVideo(video) {
+        if (video.dataset.igvPrepared) return;
+        video.dataset.igvPrepared = '1';
+        video.controls = false;
+        if (!video.preload || video.preload === 'none') video.preload = 'metadata';
+    }
+
+    function prepareAllChatVideos() {
+        document.querySelectorAll('#chat video').forEach(prepareChatVideo);
+    }
+
+    function ensureVideoViewer() {
+        if (videoViewer && videoViewer.isConnected) return videoViewer;
+
+        videoViewer = document.createElement('div');
+        videoViewer.id = VIDEO_VIEWER_ID;
+        videoViewer.hidden = true;
+        videoViewer.setAttribute('role', 'dialog');
+        videoViewer.setAttribute('aria-modal', 'true');
+        videoViewer.setAttribute('aria-label', 'Video player');
+
+        const stage = document.createElement('div');
+        stage.className = 'igv-stage';
+
+        videoEl = document.createElement('video');
+        videoEl.className = 'igv-video';
+        videoEl.setAttribute('playsinline', '');
+        videoEl.setAttribute('webkit-playsinline', '');
+        videoEl.preload = 'auto';
+        videoEl.controls = false;
+        stage.appendChild(videoEl);
+
+        const badge = document.createElement('div');
+        badge.className = 'igv-paused-badge';
+
+        videoStatus = document.createElement('div');
+        videoStatus.className = 'igv-status';
+        videoStatus.hidden = true;
+
+        const close = document.createElement('button');
+        close.className = 'igv-close';
+        close.type = 'button';
+        close.setAttribute('aria-label', 'Close video');
+        close.textContent = '×';
+
+        const bar = document.createElement('div');
+        bar.className = 'igv-video-bar';
+        videoRange = document.createElement('input');
+        videoRange.type = 'range';
+        videoRange.min = '0';
+        videoRange.max = '1000';
+        videoRange.step = '1';
+        videoRange.value = '0';
+        videoRange.setAttribute('aria-label', 'Seek');
+        bar.appendChild(videoRange);
+
+        videoViewer.append(stage, badge, videoStatus, close, bar);
+        document.body.appendChild(videoViewer);
+
+        close.addEventListener('click', closeVideoViewer);
+        stage.addEventListener('click', (event) => {
+            if (event.target === videoEl) toggleVideoPlayback();
+            else if (event.target === stage) closeVideoViewer();
+        });
+
+        videoRange.addEventListener('input', () => {
+            if (videoEl.duration) videoEl.currentTime = (Number(videoRange.value) / 1000) * videoEl.duration;
+        });
+        videoEl.addEventListener('timeupdate', () => {
+            if (!videoEl.duration || document.activeElement === videoRange) return;
+            videoRange.value = String(Math.round((videoEl.currentTime / videoEl.duration) * 1000));
+        });
+        videoEl.addEventListener('play', () => videoViewer.classList.remove('igv-paused'));
+        videoEl.addEventListener('pause', () => videoViewer.classList.add('igv-paused'));
+        videoEl.addEventListener('ended', () => videoViewer.classList.add('igv-paused'));
+        videoEl.addEventListener('error', () => {
+            if (!videoEl.getAttribute('src')) return;
+            videoStatus.hidden = false;
+            videoStatus.textContent = 'This video could not be played.';
+        });
+
+        return videoViewer;
+    }
+
+    function toggleVideoPlayback() {
+        if (!videoEl) return;
+        if (videoEl.paused) videoEl.play().catch(() => {});
+        else videoEl.pause();
+    }
+
+    function openVideoViewer(video) {
+        const src = findVideoSource(video);
+        if (!src) return;
+
+        ensureVideoViewer();
+        videoStatus.hidden = true;
+        videoRange.value = '0';
+        videoEl.src = src;
+        videoViewer.classList.add('igv-paused');
+        videoViewer.hidden = false;
+        document.body.classList.add('igv-open');
+        // Called from the click that opened the player, so the browser allows playback.
+        videoEl.play().catch(() => {});
+    }
+
+    function closeVideoViewer() {
+        if (!videoViewer || videoViewer.hidden) return;
+        videoEl.pause();
+        videoEl.removeAttribute('src');
+        videoEl.load();
+        videoViewer.hidden = true;
+        document.body.classList.remove('igv-open');
+    }
+
+    function onChatVideoActivation(event) {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const video = target.closest('video');
+        if (!video || !isChatVideo(video)) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        openVideoViewer(video);
+    }
+
+    function onVideoKeyDown(event) {
+        if (!videoViewer || videoViewer.hidden) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeVideoViewer();
+        } else if (event.key === ' ') {
+            event.preventDefault();
+            toggleVideoPlayback();
+        }
+    }
+
     function init() {
         addRuntimeStyle();
         // Click is the primary path. Pointerup is a mobile fallback for skins
@@ -533,6 +798,11 @@
             if (event.pointerType === 'touch') onChatImageActivation(event);
         }, true);
         document.addEventListener('keydown', onKeyDown, true);
+        document.addEventListener('click', onChatVideoActivation, true);
+        document.addEventListener('keydown', onVideoKeyDown, true);
+        prepareAllChatVideos();
+        // ST adds messages (and their videos) over time, so keep preparing new ones.
+        new MutationObserver(prepareAllChatVideos).observe(document.body, { childList: true, subtree: true });
         console.info(`[${EXT}] Instagram-style toolbar and image zoom loaded.`);
     }
 
